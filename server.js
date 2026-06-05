@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// ===== YOUR KEYS =====
+// Supabase connection
 const supabase = createClient(
     'https://qfoqqpwcphrrxqtlfhkl.supabase.co',
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmb3FxcHdjcGhycnhxdGxmaGtsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDY4MjA5MywiZXhwIjoyMDk2MjU4MDkzfQ.ADKPi4uwSIEEpfoRMEzo4ILglKJRE5DWenTGJfXWe1c'
@@ -16,15 +16,11 @@ const supabase = createClient(
 
 const MISTRAL_API_KEY = 'xUVgaCt6tC1GWOhumeYsmUuTXqTC10wM';
 
-console.log('🚀 Server starting...');
-console.log('   ✅ Supabase Connected');
-console.log('   ✅ Mistral AI Ready');
-
-// ===== HEALTH CHECK (IMPORTANT - FIXES 404) =====
+// Health check
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK', 
-        message: 'MRZE AI Server Running',
+        message: 'MRZE AI Running',
         timestamp: new Date().toISOString()
     });
 });
@@ -32,41 +28,32 @@ app.get('/api/health', (req, res) => {
 // Root endpoint
 app.get('/', (req, res) => {
     res.json({ 
-        message: 'MRZE AI API is running',
+        message: 'MRZE AI API is running!',
         endpoints: {
             health: '/api/health',
             register: 'POST /api/auth/register',
             login: 'POST /api/auth/login',
             chat: 'POST /api/chat/send',
-            image: 'POST /api/image/generate',
-            earnings: 'GET /api/earnings'
+            image: 'POST /api/image/generate'
         }
     });
 });
 
-// ===== AUTH MIDDLEWARE =====
+// Auth middleware
 async function authenticateUser(req, res, next) {
     const token = req.headers.authorization?.split(' ')[1];
-    if (!token) {
-        return res.status(401).json({ error: 'No token provided' });
-    }
+    if (!token) return res.status(401).json({ error: 'No token' });
     
     const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) {
-        return res.status(401).json({ error: 'Invalid or expired token' });
-    }
+    if (error) return res.status(401).json({ error: 'Invalid token' });
     
     req.user = user;
     next();
 }
 
-// ===== REGISTER =====
+// Register
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, username } = req.body;
-    
-    if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password required' });
-    }
     
     const { data, error } = await supabase.auth.signUp({
         email,
@@ -74,43 +61,24 @@ app.post('/api/auth/register', async (req, res) => {
         options: { data: { username: username || email.split('@')[0] } }
     });
     
-    if (error) {
-        return res.status(400).json({ error: error.message });
-    }
+    if (error) return res.status(400).json({ error: error.message });
     
-    res.status(201).json({ 
-        message: 'Registration successful! Please verify your email.', 
-        user: { id: data.user.id, email: data.user.email } 
-    });
+    res.json({ message: 'Registration successful!', user: data.user });
 });
 
-// ===== LOGIN =====
+// Login
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return res.status(401).json({ error: 'Invalid credentials' });
     
-    if (error) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    res.json({
-        token: data.session.access_token,
-        user: {
-            id: data.user.id,
-            email: data.user.email,
-            username: data.user.user_metadata?.username
-        }
-    });
+    res.json({ token: data.session.access_token, user: data.user });
 });
 
-// ===== MISTRAL AI CHAT =====
+// Chat
 app.post('/api/chat/send', authenticateUser, async (req, res) => {
     const { message } = req.body;
-    
-    if (!message) {
-        return res.status(400).json({ error: 'Message is required' });
-    }
     
     try {
         const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
@@ -121,86 +89,45 @@ app.post('/api/chat/send', authenticateUser, async (req, res) => {
             },
             body: JSON.stringify({
                 model: 'mistral-small-latest',
-                messages: [
-                    { role: 'system', content: 'You are MRZE AI, a helpful assistant.' },
-                    { role: 'user', content: message }
-                ],
-                temperature: 0.7,
-                max_tokens: 1000
+                messages: [{ role: 'user', content: message }]
             })
         });
         
         const data = await response.json();
-        const reply = data.choices[0].message.content;
-        
-        res.json({ response: reply });
+        res.json({ response: data.choices[0].message.content });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// ===== IMAGE GENERATION (YOU EARN MONEY!) =====
+// Generate image
 app.post('/api/image/generate', authenticateUser, async (req, res) => {
     const { prompt } = req.body;
-    
-    if (!prompt) {
-        return res.status(400).json({ error: 'Prompt is required' });
-    }
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
+    const earnings = 0.0025;
     
     try {
-        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`;
-        const earnings = 0.0025;
-        
-        // Store earnings in database
         await supabase.from('earnings').insert({
             user_id: req.user.id,
             amount: earnings,
             source: 'pollinations_image',
-            description: prompt.substring(0, 100)
+            description: prompt
         });
-        
-        res.json({
-            success: true,
-            imageUrl: imageUrl,
-            prompt: prompt,
-            earnings: earnings,
-            message: `💰 You earned $${earnings} from this image!`
-        });
+        res.json({ success: true, imageUrl: imageUrl, earnings: earnings });
     } catch (error) {
-        res.json({ 
-            success: true, 
-            imageUrl: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`,
-            earnings: 0.0025
-        });
+        res.json({ success: true, imageUrl: imageUrl, earnings: earnings });
     }
 });
 
-// ===== GET EARNINGS =====
+// Get earnings
 app.get('/api/earnings', authenticateUser, async (req, res) => {
-    const { data, error } = await supabase
-        .from('earnings')
-        .select('*')
-        .eq('user_id', req.user.id)
-        .order('created_at', { ascending: false });
-    
-    const total = data?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0;
-    
-    res.json({ 
-        totalEarnings: total, 
-        transactions: data || [],
-        markupRate: '25%'
-    });
+    const { data } = await supabase.from('earnings').select('*').eq('user_id', req.user.id);
+    const total = data?.reduce((sum, item) => sum + item.amount, 0) || 0;
+    res.json({ totalEarnings: total, transactions: data });
 });
 
-// ===== START SERVER =====
-app.listen(PORT, () => {
-    console.log(`
-╔════════════════════════════════════════════════╗
-║   🚀 MRZE AI SERVER RUNNING                    ║
-╠════════════════════════════════════════════════╣
-║   📡 URL: http://localhost:${PORT}              ║
-║   💰 Earnings: 25% markup on images            ║
-║   ✅ /api/health - Check status                ║
-╚════════════════════════════════════════════════╝
-    `);
+// ===== THIS IS IMPORTANT - KEEPS SERVER RUNNING =====
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 MRZE AI Server running on port ${PORT}`);
+    console.log(`📍 Health check: https://sd.up.railway.app/api/health`);
 });
