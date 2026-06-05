@@ -1,7 +1,6 @@
 {
-  "name": "mrze-ai-backend",
+  "name": "mrze-backend",
   "version": "1.0.0",
-  "description": "MRZE AI Platform Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
